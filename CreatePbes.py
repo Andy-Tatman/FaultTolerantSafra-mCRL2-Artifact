@@ -77,7 +77,7 @@ tol_files_n3_red = []
 for mid in TOL_OPTIONS:
     tol_files_n3_red.append(TOL_N3_RED + TOL_N3_FILE_BEGIN + mid + TOL_N3_CR + TOL_RED_FILE_END)
 
-PROPS_ADDR = "..\\PropertiesThesis\\"
+PROPS_ADDR = ".\\PropertiesThesis\\"
 
 SENSI_NORM_FORMS = \
     ["P1_AllNodesCanAnno.mcf", "P2_AllNodesCanSendRecvBasic.mcf", "P4_CanAnnounceWithDone.mcf", \
