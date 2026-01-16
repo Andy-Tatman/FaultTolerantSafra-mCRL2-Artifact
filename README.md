@@ -11,9 +11,12 @@ Note that for many of the specifications (and especially the fault-tolerant mode
 Instead, we recommend either using the mCRL2 GUI, or using the _.py_ scripts provided in this repository.
 We run mCRL2 on Windows. If you use a different OS, or if mCRL2 is installed in a different location, you may have to adjust the first parameter of _commandList_ in the _.py_ files.
 
-## *-Reduced 
+## *_Reduced 
 For each configuration (_N_), we create both a 'normal' and a reduced specification. In the reduced spec, we have disabled the actions that make reflective loops in the model, e.g. "reportSeq". 
 Properties using the _mu X_ operator can only be checked on the reduced specifications. 
+
+## *_NoCr
+As the name implies, the specifications marked with "NoCr" have crashes disabled in the actual specification, such that no crashes will occur in the resulting models, even for _C>0_.
 
 ## Tol_Bug_Demonstration
 We discovered a bug in the fault-tolerant algorithm, for all _N >= 2_. In this folder, we show that the Safety property is violated, and provide a counter-example showing the violation. This "EVI_" file can be examined using mCRL2's [ltsgraph](https://mcrl2.org/web/user_manual/tools/release/ltsgraph.html) tool.
