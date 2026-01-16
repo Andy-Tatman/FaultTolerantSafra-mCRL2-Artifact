@@ -1,6 +1,6 @@
 import subprocess
 
-# RUN THIS SCRIPT FROM THE FINALSpecs folder!
+# Run this script from the Root folder of the repo!
 # If mCRL2 is installed in a different location (in Windows), adjust the first 
 # field of commandList. 
 # If you are running this on Linux, you may need to adjust the "\\".
@@ -135,41 +135,41 @@ ctr = 0
 # Run the specific section you are interested in. 
 # Note that the larger instances (N4 sensi, N3 tol & up) will take a LONG time.
 
-# print("Running Sensi N2")
-# for p in sensi_forms_n2 + sensi_forms_n2_red:
-#     checkPBES(p)
-#     ctr += 1
-#     if ctr%4 == 0:
-#         print("Done " + str(ctr) + " so far.")
+print("Running Sensi N2")
+for p in sensi_forms_n2 + sensi_forms_n2_red:
+    checkPBES(p)
+    ctr += 1
+    if ctr%4 == 0:
+        print("Done " + str(ctr) + " so far.")
 
-# print("Running Sensi N3")
-# for p in sensi_forms_n3 + sensi_forms_n3_red:
-#     checkPBES(p)
-#     ctr += 1
-#     if ctr%4 == 0:
-#         print("Done " + str(ctr) + " so far.")
+print("Running Sensi N3")
+for p in sensi_forms_n3 + sensi_forms_n3_red:
+    checkPBES(p)
+    ctr += 1
+    if ctr%4 == 0:
+        print("Done " + str(ctr) + " so far.")
         
-# print("Running Sensi N4")
-# for p in sensi_forms_n4 + sensi_forms_n4_red:
-#     checkPBES(p)
-#     ctr += 1
-#     if ctr%1 == 0:
-#         print("Done " + str(ctr) + " so far.")
+print("Running Sensi N4")
+for p in sensi_forms_n4 + sensi_forms_n4_red:
+    checkPBES(p)
+    ctr += 1
+    if ctr%1 == 0:
+        print("Done " + str(ctr) + " so far.")
 
-# print("Running Tol N2")
-# for p in tol_forms_n2 + tol_forms_n2_red:
-#     checkPBES(p)
-#     ctr += 1  
-#     if ctr%4 == 0:
-#         print("Done " + str(ctr) + " so far.")
+print("Running Tol N2")
+for p in tol_forms_n2 + tol_forms_n2_red:
+    checkPBES(p)
+    ctr += 1  
+    if ctr%4 == 0:
+        print("Done " + str(ctr) + " so far.")
     
-# print("Running Tol N3")
-# for p in tol_forms_n3 + tol_forms_n3_red:
-#     print(p) 
-#     checkPBES(p)
-#     ctr += 1
-#     if ctr%1 == 0:
-#         print("Done " + str(ctr) + " so far.")
+print("Running Tol N3")
+for p in tol_forms_n3 + tol_forms_n3_red:
+    print(p) 
+    checkPBES(p)
+    ctr += 1
+    if ctr%1 == 0:
+        print("Done " + str(ctr) + " so far.")
 
 # By default, this should equal 4*9=36 for 1 batch of Sensi (norm+red), 
 # or 4*14 = 56 for 1 batch of Tol (norm+red) 

@@ -1,6 +1,6 @@
 import subprocess
 
-# RUN THIS SCRIPT FROM THE FINALSpecs folder!
+# Run this script from the Root folder of the repo!
 # If mCRL2 is installed in a different location (in Windows), adjust the first 
 # field of commandList. 
 # If you are running this on Linux, you may need to adjust the "\\".
