@@ -1,0 +1,6 @@
+forall i : ID . forall j : ID. val (i != j) =>
+(exists s1 : Nat . val (s1 < SEQ_LIMIT+N_PROCS) =>
+    <true* . toBuff(s1, i, j)>true)
+&&
+(exists s2 : Nat . val (s2 < SEQ_LIMIT+N_PROCS) =>
+    <true* . fromBuff(s2, i, j)>true)

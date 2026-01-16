@@ -1,0 +1,266 @@
+map %Define & set constants
+	MSG_LIMIT_GLOBAL, SEQ_LIMIT  : Nat;
+	N_PROCS   : Pos;
+	N_MSG_BUFFS : Int;
+eqn 
+	MSG_LIMIT_GLOBAL = 2;	% M
+	SEQ_LIMIT = 1;			% S
+	N_PROCS   = 2;			% N
+	% Each node i has a channel to each other j (!= i). 
+	% We have *separate* channels i->j & j->i.
+	N_MSG_BUFFS = (N_PROCS * (N_PROCS-1)); 
+
+
+% We define a custom type ID, which allows us to then easily quantify over the available IDs. 
+sort
+	ID = struct Zero | One;
+map
+	IDtoNat : ID -> Nat;
+	NatToID : Nat -> ID;
+	BLACK_INIT_ZERO : ID;
+var 
+	id : ID;
+eqn
+	IDtoNat(Zero) = 0;
+	IDtoNat(One)  = 1;
+	NatToID(0) = Zero;
+	NatToID(1) = One;
+	BLACK_INIT_ZERO = NatToID((0-1) mod N_PROCS); % = N_PROCS-1.
+
+
+% Calculations for furthest_i(j,k):
+map 
+	furthest 	 : ID # ID # ID -> ID;
+	furthestCond : ID # ID # ID -> Bool;
+var 
+	iFC, jFC, kFC : ID;
+eqn
+	furthestCond(iFC,jFC,kFC) = (iFC <= jFC && jFC <= kFC) || (kFC < iFC && iFC <= jFC) || (jFC <= kFC && kFC < iFC);
+	(furthestCond(iFC,jFC,kFC)) -> furthest(iFC,jFC,kFC) = kFC;
+	!(furthestCond(iFC,jFC,kFC)) -> furthest(iFC,jFC,kFC) = jFC;
+
+
+sort
+	% Our (abstracted) basic messages consist solely of the sequence counter seq_m.
+	BasicMsg = Nat; 
+	MsgBuff  = List(BasicMsg);
+map
+	% Define operations
+	remove: MsgBuff # BasicMsg -> MsgBuff;
+	add : MsgBuff # BasicMsg -> MsgBuff;
+var 
+	mb : MsgBuff;
+	x, m : BasicMsg;
+eqn 
+	% We remove the *first* item in the list equalling m.
+	remove([], m) = [];
+	(x == m) -> remove(x |> mb, m) = mb;
+	(x != m) -> remove(x |> mb, m) = x |> remove(mb, m);
+
+	% make the add operations sorted, to ensure that the buffer remains ordered:
+	add([], m) = [m];
+	(m <= x) -> add(x |> mb, m) = m |> x |> mb;
+	(m > x) -> add(x |> mb, m) = x |> add(mb, m);	
+
+
+sort
+	Token    = struct pair(fst: Int, snd:ID); % (count_t, black_t)
+	TokBuff  = List(Token); % There does not appear to be any polymorphism in mCRL2, cite : https://mcrl2.org/web/_downloads/4b1f3f29182d9ace80eda873d67c8720/mcrl2data.pdf
+map 
+	Tok : Int # ID -> Token;
+	countT : Token -> Int;
+	blackT : Token -> ID;
+	removeT: TokBuff # Token -> TokBuff;
+	addT   : TokBuff # Token -> TokBuff;
+	
+	tokPrev, tokNext : ID -> ID;
+	EMPTYTOK : Token;
+
+	newTokFurthest : ID # ID # ID -> ID;
+var 
+	fstV : Int;
+	secV : ID;
+	tokX, tokT : Token;
+	tokB : TokBuff;
+	idCurr : ID;
+	origID, origBlLocal, origBlackT : ID;
+eqn
+	% Constructor for a token:
+	Tok(fstV, secV) = pair(fstV, secV);
+	% Get values from the token:
+	countT(pair(fstV, secV)) = fstV;
+	blackT(pair(fstV, secV)) = secV;
+	removeT([], tokT) = [];	
+	(tokX == tokT) -> removeT(tokX |> tokB, tokT) = tokB;
+	(tokX != tokT) -> removeT(tokX |> tokB, tokT) = tokX |> removeT(tokB, tokT);
+	
+	% make the addT operations sorted, to ensure that the buffer remains ordered:
+	addT([], tokT) = [tokT];
+	(tokT <= tokX) -> addT(tokX |> tokB, tokT) = tokT |> tokX |> tokB;
+	(tokT > tokX) ->  addT(tokX |> tokB, tokT) = tokX |> addT(tokB, tokT);
+
+	% Given the current id, find the previous/next ID in the ring.
+	tokPrev(idCurr) = NatToID((IDtoNat(idCurr)-1) mod N_PROCS);
+	tokNext(idCurr) = NatToID((IDtoNat(idCurr)+1) mod N_PROCS);
+
+	EMPTYTOK = pair(0,Zero);
+	
+	% For HandleToken: if we do not announce, then we update black_t using the result of 
+	% furthest_i(black_i, black_t). As we cannot update black_t within HandleToken, 
+	% we use this to make HanldeToken simpler.
+	newTokFurthest(origID, origBlLocal, origBlackT) = furthest(origID, furthest(origID, origBlLocal, origBlackT), tokNext(origID) );
+
+act 
+	% We supply the ids (sender,receiver) in our actions to determine to which {Msg/Tok}Buff it goes / comes from.
+	sendToBuff, recToBuff, toBuff, sendFromBuff, recFromBuff, fromBuff 					 : BasicMsg # ID # ID; 
+	tokSendToBuff, tokRecToBuff, tokToBuff, tokSendFromBuff, tokRecFromBuff, tokFromBuff : Token # ID # ID;
+	% Inform the doneChecker process that a node is Done.
+	informDone, recvDoneID, doneComm : ID;
+	% Inform the doneChecker process that a message buffer is empty.
+	informEmpty, recvEmpty, emptyComm : ID # ID;
+	% The doneChecker informs node 0 that it is safe to continue passing on the token.
+	informExtraTokSafe, recvTokSafe, tokSafeComm;
+	% To indicate that the basic algorithm is done. Note that this action may be taken 
+	% well *before* tokSafeComm is necessary.
+	basicAlgoDone; 
+	% For verifying properties, we add the ID to Announce.
+	Announce : ID;
+	BecomePassive, BecomeActive, nodeAlreadyActive: ID;
+	% For getting/receiving permission to send a message
+	sndPermSend, rcvPermSend, cPermSend : ID;
+	% Debug actions (self-loops)
+	reportSeq : Nat;
+	reportActive : ID;
+	reportErrorTooNewMessage : ID;
+
+proc
+	ReceiveToken(id:ID, black:ID, msgCount:Int, seq : Nat, active:Bool, basicDone:Bool) = 
+		(id == Zero && (seq >= SEQ_LIMIT) ) 
+		% if we are at the limit of iterations we can freely do, first get permission before we can go receive the actual token.
+		-> (recvTokSafe . sum newT:Token . (tokRecFromBuff(newT, tokPrev(id), id) . ReceiveToken_1(id, black, msgCount, seq, active, basicDone, newT) )) 
+		<> (			  sum newT:Token . (tokRecFromBuff(newT, tokPrev(id), id) . ReceiveToken_1(id, black, msgCount, seq, active, basicDone, newT) ))  
+	;
+	ReceiveToken_1(id:ID, black:ID, msgCount:Int, seq : Nat, active:Bool, basicDone:Bool, newT:Token) =
+		(active)
+		% If the node is currently active, we return to Node. When we become passive, 
+		% we will then handle the token.
+		-> (Node(id, black, msgCount, seq, active, true, newT, basicDone)) 
+		<> (HandleToken(id, black, msgCount, seq, newT, basicDone))
+	;
+
+	%PRE: When we get here, the node is passive (not active) & has the token.
+	HandleToken(id:ID, localBlack:ID, localMsgCount:Int, seq:Nat, tok:Token, basicDone:Bool) =  
+		( localMsgCount + countT(tok) == 0 && furthest(id, localBlack, blackT(tok)) == id ) 
+		-> % We have terminated.
+			(Announce(id) . Node(id, id, 0, seq, false, false, EMPTYTOK, basicDone))
+		<> % Not yet terminated, continue on with the token.
+			( tokSendToBuff(pair(localMsgCount + countT(tok), newTokFurthest(id, localBlack, blackT(tok))), id, tokNext(id) )
+				. Node(id,id, 0, seq+1, false, false, EMPTYTOK, basicDone)	
+			)
+	;
+
+	Node(id:ID, black:ID, msgCount:Int, seq : Nat, active:Bool, hasToken:Bool,tok:Token, basicDone:Bool) = 
+	%(
+	%	reportSeq(seq) . Node(id, black, msgCount, seq, active, hasToken,tok, basicDone) 
+	%)
+	%+
+	% ( 
+	% 	(active) -> (reportActive(id) . Node(id, black, msgCount, seq, active, hasToken,tok, basicDone) ) 
+	% )
+	% +
+	((active) ->
+		(
+		((!basicDone) -> sum j:ID . 
+			((j != id) -> 
+				(rcvPermSend(id) . sendToBuff(seq, id, j) .
+					Node(id, black, msgCount+1, seq, active, hasToken,tok, basicDone)
+				)
+			)
+		)
+		+ ( BecomePassive(id) .
+			(hasToken) 
+				->  (HandleToken(id, black, msgCount, seq, tok, basicDone))
+				<>  Node(id, black, msgCount, seq, false, hasToken, tok, basicDone)
+		  )
+		)
+	)
+	+ 
+	( sum j:ID . (j != id) -> sum newSeq:BasicMsg . 
+		(recFromBuff(newSeq,j, id) . 
+			% The node becomess active by receiving a message, if it was passive prior.
+			( (!active) -> BecomeActive(id) <> nodeAlreadyActive(id) ) . 
+		 	((newSeq == seq+1 || (newSeq == seq && j > id)) 
+			% we only update black with furthest_i(black,j) if ^ is true. (Line 3 of RBM)
+			-> Node(id, furthest(id, black,j), msgCount-1, seq, true, hasToken,tok, basicDone)
+			<> (newSeq <= seq+1)
+				-> Node(id, black, msgCount-1, seq, true, hasToken,tok, basicDone)
+				<> reportErrorTooNewMessage(id) . 
+				   Node(id, black, msgCount-1, seq, true, hasToken,tok, basicDone)
+			)
+		) 
+	)
+	+
+	% Receive an incoming token, if we are not currently storing one.
+	((!hasToken) -> 
+		ReceiveToken(id, black, msgCount, seq, active, basicDone)
+	)
+	+ 
+	% inform the doneChecker that this node will no longer send out basic messages.
+	((!basicDone) -> 
+			informDone(id) . Node(id, black, msgCount, seq, active, hasToken, tok, true)
+	)
+	;
+	
+
+	msgBuff(b:MsgBuff, sndr:ID,recv:ID) = sum seq:Nat . 
+		( % Receive a message from sndr.
+			(recToBuff(seq, sndr, recv) . msgBuff( add(b, seq), sndr, recv) )
+		+ % Send a message on to recv. 
+			( (seq in b) ->  sendFromBuff(seq, sndr, recv) . msgBuff( remove(b, seq), sndr, recv) )
+		)
+		+ % if the buffer is empty (and if the doneC can receive this) inform it that buffer is empty.
+		( (b == []) -> informEmpty(sndr, recv) . msgBuff(b, sndr, recv))
+	;
+
+
+	tokenBuff(tb:TokBuff, sndr:ID,recv:ID) = sum t:Token . (
+		% Receive a token
+		(tokRecToBuff(t, sndr, recv) . tokenBuff( addT(tb, t), sndr, recv ) )
+		+ % Send a token on.
+		( (t in tb) ->  tokSendFromBuff(t, sndr, recv) . tokenBuff( removeT(tb,t), sndr, recv) )
+	);
+	
+	doneChecker = 
+		recvDoneID(Zero) . recvDoneID(One) . 
+		recvEmpty(Zero,One) . recvEmpty(One,Zero) . 
+		basicAlgoDone . doneChecker_B;
+	doneChecker_B = informExtraTokSafe . doneChecker_B;
+
+	msgCounter(n:Nat) = sum i:ID . 
+		(n < MSG_LIMIT_GLOBAL) -> (sndPermSend(i) . msgCounter(n+1))
+	;
+	
+init 
+	hide ({sendToBuff, recToBuff, sendFromBuff, recFromBuff,  tokSendToBuff, tokRecToBuff, 
+		   tokSendFromBuff, tokRecFromBuff, informDone, recvDoneID, informEmpty, recvEmpty, 
+		   informExtraTokSafe, recvTokSafe}, 
+		allow( {toBuff, fromBuff, tokToBuff, tokFromBuff,  Announce, BecomeActive, BecomePassive, nodeAlreadyActive,
+				doneComm, emptyComm, basicAlgoDone, tokSafeComm,
+				cPermSend,
+				reportSeq, reportActive, reportErrorTooNewMessage
+				},
+			comm({sendToBuff|recToBuff -> toBuff, sendFromBuff|recFromBuff -> fromBuff,  
+				  tokSendToBuff|tokRecToBuff -> tokToBuff, tokSendFromBuff|tokRecFromBuff -> tokFromBuff,
+				  informDone|recvDoneID -> doneComm, informEmpty|recvEmpty -> emptyComm, 
+				  informExtraTokSafe|recvTokSafe -> tokSafeComm,
+				  sndPermSend|rcvPermSend -> cPermSend}, 
+				   Node(Zero,Zero, 0,0, true, true, pair(0, BLACK_INIT_ZERO), false ) 
+				|| Node(One, One , 0,0, true, false, EMPTYTOK, false )
+				|| msgBuff([], Zero,One) || msgBuff([], One,Zero)
+				|| tokenBuff([], Zero,One) || tokenBuff([], One,Zero)
+				|| doneChecker
+				|| msgCounter(0)
+			)
+		)
+	)
+;

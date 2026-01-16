@@ -1,0 +1,10 @@
+% Only in the fault-tolerant models!
+% We can do 1 additional iteration for each crash, EXCEPT for the crash that 
+% results in only 1 more node remaining alive. 
+forall s:Nat . 
+    % Using min, we allow s to reach MAX_N_CRASHES iff C<N-1.
+    ( val (s <= SEQ_LIMIT + 1 + min(N_PROCS-2, MAX_N_CRASHES) )   
+		=> <true* . reportSeq(s)>true)
+    &&
+    ( val (s == 1 + SEQ_LIMIT + 1 + min(N_PROCS-2, MAX_N_CRASHES)) 
+		=> [true* . reportSeq(s)]false)

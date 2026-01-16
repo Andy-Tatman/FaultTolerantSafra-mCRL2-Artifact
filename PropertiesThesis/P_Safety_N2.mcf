@@ -1,0 +1,2 @@
+% for N=2
+forall i:ID . [true* . (Announce(Zero) + Announce(One)) . true* . (BecomeActive(i) + reportActive(i))]false

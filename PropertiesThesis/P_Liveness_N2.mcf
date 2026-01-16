@@ -1,0 +1,3 @@
+% for N=2
+[(!Announce(Zero) && !Announce(One))* . basicAlgoDone]
+mu X. [!Announce(Zero) && !Announce(One)]X && <true>true

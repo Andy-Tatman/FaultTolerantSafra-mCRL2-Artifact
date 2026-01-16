@@ -1,0 +1,6 @@
+% Only in the fault-tolerant models!
+%if we skip adding in node i
+forall i:ID . [true* . skipAddToCountT(i)] 
+% assuming i does not crash and is not the only remaining non-crashed node*, i eventually always performs the addToCountT(i) action.
+% *if i is the only remaining node, we can announce without needing the counterlist, so whether i added its count is irrelevant.
+mu X. [!addToCountT(i) && !cCrash(i) && !lastNodeRemaining(i)]X && <true>true

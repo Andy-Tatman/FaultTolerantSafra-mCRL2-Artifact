@@ -1,0 +1,4 @@
+forall s:Nat . 
+( val (s <= SEQ_LIMIT+1)   => <true* . reportSeq(s)>true)
+&&
+( val (s == SEQ_LIMIT+1+1) => [true* . reportSeq(s)]false)

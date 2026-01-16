@@ -1,0 +1,2 @@
+% Only in the fault-tolerant models!
+forall i:ID . <true* . cCrash(i)>true

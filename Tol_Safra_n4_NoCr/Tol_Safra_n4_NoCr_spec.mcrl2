@@ -1,0 +1,579 @@
+map %Define & set constants
+	MSG_LIMIT_GLOBAL, SEQ_LIMIT : Nat;
+	N_PROCS   : Pos;
+	N_MSG_BUFFS : Int;
+	MAX_N_CRASHES : Nat;
+eqn 
+	MSG_LIMIT_GLOBAL = 2;	% M
+	SEQ_LIMIT = 1;			% S
+	N_PROCS   = 4;			% N
+	% Each node i has a channel to each other j (!= i). 
+	% We have *separate* channels i->j & j->i.
+	N_MSG_BUFFS = (N_PROCS * (N_PROCS-1)); 
+	% Must be <= N-1
+	MAX_N_CRASHES = 0;
+
+% We define a custom type ID, which allows us to then easily quantify over the available IDs. 
+sort
+	ID = struct Zero | One | Two | Three;
+map
+	IDtoNat : ID -> Nat;
+	NatToID : Nat -> ID;
+	getNextID : ID # FSet(ID) -> ID;
+	BLACK_INIT_ZERO : ID;
+var 
+	id : ID; 
+	crashedNodes : FSet(ID);
+eqn
+	IDtoNat(Zero) = 0;
+	IDtoNat(One)  = 1;
+	IDtoNat(Two)  = 2;
+	IDtoNat(Three) = 3;
+	NatToID(0) = Zero;
+	NatToID(1) = One;
+	NatToID(2) = Two;
+	NatToID(3) = Three;
+	%PRE: there is at least one viable ID *not* in crashedNodes. 
+	(id in crashedNodes)  -> getNextID(id, crashedNodes) = getNextID( NatToID((IDtoNat(id)+1)mod N_PROCS) , crashedNodes);
+	!(id in crashedNodes) -> getNextID(id, crashedNodes) = id;
+	BLACK_INIT_ZERO = NatToID((0-1) mod N_PROCS); % = N_PROCS-1
+
+% Calculations for furthest_i(j,k):
+map 
+	furthest 	 : ID # ID # ID -> ID;
+	furthestCond : ID # ID # ID -> Bool;
+var 
+	iFC, jFC, kFC : ID;
+eqn
+	furthestCond(iFC,jFC,kFC) = (iFC <= jFC && jFC <= kFC) || (kFC < iFC && iFC <= jFC) || (jFC <= kFC && kFC < iFC);
+	(furthestCond(iFC,jFC,kFC)) -> furthest(iFC,jFC,kFC) = kFC;
+	!(furthestCond(iFC,jFC,kFC)) -> furthest(iFC,jFC,kFC) = jFC;
+
+
+sort
+	% Our (abstracted) basic messages consist solely of the sequence counter seq_m.
+	BasicMsg = Nat; 
+	MsgBuff  = List(BasicMsg);
+map
+	% Define operations
+	remove: MsgBuff # BasicMsg -> MsgBuff;
+	add : MsgBuff # BasicMsg -> MsgBuff;
+var 
+	mb : MsgBuff;
+	x, m : BasicMsg;
+eqn 
+	% We remove the *first* item in the list equalling m.
+	remove([], m) = [];
+	(x == m) -> remove(x |> mb, m) = mb;
+	(x != m) -> remove(x |> mb, m) = x |> remove(mb, m);
+
+	% make the add operations sorted, to ensure that the buffer remains ordered:
+	add([], m) = [m];
+	(m <= x) -> add(x |> mb, m) = m |> x |> mb;
+	(m > x) -> add(x |> mb, m) = x |> add(mb, m);	
+
+
+% Each node keeps a list of (ID, counter_ID) for each ID (including its own).
+% Similarly, the token also has such a list.
+sort 
+	Counter = struct pair(fst:ID, snd:Int); % (ID, counter_ID)
+	CtrList = List(Counter); % There does not appear to be any polymorphism in mCRL2, cite : https://mcrl2.org/web/_downloads/4b1f3f29182d9ace80eda873d67c8720/mcrl2data.pdf
+map
+	INIT_LIST : CtrList;
+	% Constructor
+	Ctr : ID # Int -> Counter;
+	% Getter functions
+	getIdC  : Counter -> ID;
+	getCtrV : Counter -> Int;
+	incrAtID : ID # CtrList -> CtrList;
+	decrAtId : ID # CtrList -> CtrList;
+	% Given a set of crashed nodes: sum over the list, 
+	% only adding the values from non-crashed nodes.
+	sumNonCrashed : FSet(ID) # CtrList -> Int;
+	% Given an ID, find the corrosponding element in the list 
+	% and replace snd with the provided Int.
+	updateCount : ID # CtrList # Int -> CtrList;
+var
+	idAlter : ID;
+	ctr : Counter;
+	cl : CtrList;
+	fstCtr : ID;
+	sndCtr : Int;
+	crashedN : FSet(ID);
+	newCount : Int;
+eqn	
+	% If we increase N, we need to add the corrosponding (id, 0) to this list.
+	INIT_LIST = [pair(Zero,0), pair(One,0), pair(Two,0), pair(Three,0)];
+	% Constructor
+	Ctr(fstCtr, sndCtr) = pair(fstCtr, sndCtr);
+	getIdC(pair(fstCtr, sndCtr)) = fstCtr;
+	getCtrV(pair(fstCtr, sndCtr)) = sndCtr;
+	incrAtID(idAlter, []) = [];
+	(idAlter == getIdC(ctr)) -> incrAtID(idAlter, ctr |> cl) = ( Ctr(getIdC(ctr), getCtrV(ctr)+1 ) ) |> cl;
+	(idAlter != getIdC(ctr)) -> incrAtID(idAlter, ctr |> cl) = ctr |> incrAtID(idAlter, cl);
+	decrAtId(idAlter, []) = [];
+	(idAlter == getIdC(ctr)) -> decrAtId(idAlter, ctr |> cl) = ( Ctr(getIdC(ctr), getCtrV(ctr)-1 ) ) |> cl;
+	(idAlter != getIdC(ctr)) -> decrAtId(idAlter, ctr |> cl) = ctr |> decrAtId(idAlter, cl);
+	% for sumNonCrashed, we only want to add the values of nodes 
+    % that are NOT in the crashedNode set.
+	sumNonCrashed(crashedN, []) = 0;
+	(getIdC(ctr) in crashedN)  -> sumNonCrashed(crashedN, ctr|>cl) = 				sumNonCrashed(crashedN, cl);
+	!(getIdC(ctr) in crashedN) -> sumNonCrashed(crashedN, ctr|>cl) = getCtrV(ctr) + sumNonCrashed(crashedN, cl);
+
+	updateCount(idAlter, [], newCount) = [];
+	(idAlter == getIdC(ctr)) -> updateCount(idAlter, ctr |> cl, newCount) = ( Ctr(idAlter, newCount) ) |> cl;
+	(idAlter != getIdC(ctr)) -> updateCount(idAlter, ctr |> cl, newCount) = ctr |> updateCount(idAlter, cl, newCount);
+
+
+sort
+	Token    = struct quad(fst: CtrList, snd:ID, trd:FSet(ID), fth:Nat); % (count_t, black_t, crashed_t, seq_t)
+	TokBuff  = List(Token); % There does not appear to be any polymorphism in mCRL2, cite : https://mcrl2.org/web/_downloads/4b1f3f29182d9ace80eda873d67c8720/mcrl2data.pdf
+map 
+	Tok : CtrList # ID # FSet(ID) # Nat -> Token;
+	countT : Token -> CtrList;
+	blackT : Token -> ID;
+	seqT   : Token -> Nat;
+	crashedT  : Token -> FSet(ID);
+	updateCrTMin  : Token # FSet(ID) -> Token; % updates crashed_t by REMOVING the second set from the token.
+	updateCrTPlus : Token # FSet(ID) -> Token; % updates crashed_t by ADDING the second set to the token.
+	updateCoT : Token # ID # Int -> Token;  % updates count_t^i, for the given ID, with value [INT]. 
+	incrSeqT  : Token -> Token;	
+	setSeqT : Token # Nat -> Token;
+	updateBlackT : Token # ID -> Token;
+
+	removeT: TokBuff # Token -> TokBuff;
+	addT   : TokBuff # Token -> TokBuff;
+	
+	tokPrev, tokNext : ID -> ID;
+	EMPTYTOK : Token;
+	INIT_OLD_TOK : ID -> Token;
+var 
+	fstV : CtrList;
+	secV : ID;
+	trdV : FSet(ID);
+	fthV : Nat;
+	crashI : FSet(ID); 
+	newSeq : Nat;
+	tokX, tokT : Token;
+	tokB : TokBuff;
+	idCurr : ID;
+	newCount : Int;
+eqn
+	% Constructor for a token:
+	Tok(fstV, secV, trdV, fthV) = quad(fstV, secV, trdV, fthV);
+	% Get values from the token:
+	countT(quad(fstV, secV, trdV, fthV)) = fstV;
+	blackT(quad(fstV, secV, trdV, fthV)) = secV;
+	crashedT(quad(fstV, secV, trdV, fthV)) = trdV;
+	seqT(quad(fstV, secV, trdV, fthV)) = fthV;
+	% crashed_t <- crashed_t \setdiff crashedSet
+	updateCrTMin(quad(fstV, secV, trdV, fthV), crashI) = quad(fstV, secV, (trdV - crashI ), fthV);
+	% crashed_t <- crashed_t \union crashedSet
+	updateCrTPlus(quad(fstV, secV, trdV, fthV), crashI) = quad(fstV, secV, (trdV + crashI ), fthV);
+	% count_t is unaltered, except count_t[idCurr] now = newCount. 
+	updateCoT(quad(fstV, secV, trdV, fthV), idCurr, newCount) = quad(updateCount(idCurr, fstV, newCount), secV, trdV, fthV);
+	% Increment seq_t
+	incrSeqT(quad(fstV, secV, trdV, fthV)) = quad(fstV, secV, trdV, fthV+1);
+	% Set seq_t to a specific value.
+	setSeqT(quad(fstV, secV, trdV, fthV), newSeq) = quad(fstV, secV, trdV, newSeq);
+
+	updateBlackT(quad(fstV, secV, trdV, fthV), idCurr) = quad(fstV, idCurr, trdV, fthV);
+
+	removeT([], tokT) = [];	
+	(tokX == tokT) -> removeT(tokX |> tokB, tokT) = tokB;
+	(tokX != tokT) -> removeT(tokX |> tokB, tokT) = tokX |> removeT(tokB, tokT);
+	
+	% make the addT operations sorted, to ensure that the buffer remains ordered:
+	addT([], tokT) = [tokT];
+	(tokT <= tokX) -> addT(tokX |> tokB, tokT) = tokT |> tokX |> tokB;
+	(tokT > tokX) ->  addT(tokX |> tokB, tokT) = tokX |> addT(tokB, tokT);
+
+	% Given the current id, find the previous/next ID in the ring. (This ID may be a crashed node!)
+	tokPrev(idCurr) = NatToID((IDtoNat(idCurr)-1) mod N_PROCS);
+	tokNext(idCurr) = NatToID((IDtoNat(idCurr)+1) mod N_PROCS);
+
+	EMPTYTOK = quad(INIT_LIST, Zero, {}, 0);
+
+	% Initially, we set black_t = i for each node i. 
+	% If we node 0 crashes before sending the first token, N-1 needs to take over. 
+	% (etc if N-1 crashes.)
+	% In FD_i, we then send out a 'new' token, with black_t set to i. 
+	INIT_OLD_TOK(secV) = quad(INIT_LIST, secV, {}, 0);
+
+
+
+act 
+	% We supply the ids (sender,receiver) in our actions to determine to which {Msg/Tok}Buff it goes / comes from.
+	sendToBuff, recToBuff, toBuff, sendFromBuff, recFromBuff, fromBuff 					 : BasicMsg # ID # ID; 
+	tokSendToBuff, tokRecToBuff, tokToBuff, tokSendFromBuff, tokRecFromBuff, tokFromBuff : Token # ID # ID;
+	% Inform the "Done" process that a node is Done, followed by when message buffers are empty.
+	informDone, recvDoneID, doneComm : ID;
+	informEmpty, recvEmpty, emptyComm : ID # ID;
+	% The doneChecker informs nodes i that it is safe to continue passing on the token.
+	informExtraTokSafe, recvTokSafe, tokSafeComm;
+	% To indicate that the basic algorithm is done. Note that this action may be taken 
+	% well *before* tokSafeComm is necessary.
+	basicAlgoDone; 
+	% For verifying properties, we add the ID to Announce.
+	Announce : ID;
+	BecomePassive, BecomeActive, nodeAlreadyActive: ID;
+	% For getting/receiving permission to send a message
+	sndPermSend, rcvPermSend, cPermSend : ID;
+	% Debug actions (self-loops)
+	reportActive : ID;
+	reportErrorIDinCrashed : ID;
+	reportErrorDismissTooNewToken : ID; 
+	reportErrorTooNewMessage : ID;
+	reportSeq : Nat;
+
+% Actions specific to the fault-tolerant variant:
+	% For a node to crash + for the failure detector to discover about this crash.
+	crash, fdDetect, cCrash: ID;
+	% For a node to be informed about a crashed node.
+	sInformCrashed, rInformCrashed, cInformCrashed : ID # ID ; %(i,j) = i has crashed, informing j.
+	dismissOldToken : Token;
+	% The FD informs the donechecker that the node with ID has crashed. (See donechecker_*)
+	sCrDone, rCrDone, cCrDone : ID;
+	% The receiver (second ID) can inform the doneChecker that it knows that the sender (first ID) has crashed. (See doneChecker_B)
+	sRecKnowsCr, rRecKnowsCr, cRecKnowsCr: ID # ID; 
+	% In HandleToken_6, we have a choice where we do or do not add to count_t. 
+	% If we do not now (the skip- action), we wish to show that *eventually* we always do (the add- action).
+	addToCountT, skipAddToCountT : ID;
+	% Action that indicates that this node knows that all other nodes have crashed.
+	lastNodeRemaining : ID; 
+
+proc
+	% PRE: The process did not previously have a token, so hasToken=False in the Node that called this.
+	ReceiveToken(id:ID, localBlack:ID, localCtrList:CtrList, seq:Nat, active:Bool, oldTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) =
+		(seq >= SEQ_LIMIT ) 
+		-> (recvTokSafe 
+			. (localFD(id, localBlack, localCtrList, seq, active, oldTok,false,EMPTYTOK, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) % localFD will return to Node. NOTE: hasToken=false, as we have not actually received a token.
+				+ sum candidateNewTok:Token . sum j:ID . (tokRecFromBuff(candidateNewTok, j, id) . ReceiveToken_1(id, localBlack, localCtrList, seq, active, oldTok, candidateNewTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) ) 
+			  )
+			)
+		<> (	sum candidateNewTok:Token . sum j:ID . (tokRecFromBuff(candidateNewTok, j, id) . ReceiveToken_1(id, localBlack, localCtrList, seq, active, oldTok, candidateNewTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) )
+		   )  	
+	;
+
+	ReceiveToken_1(id:ID, localBlack:ID, localCtrList:CtrList, seq:Nat, active:Bool, oldTok:Token, candidateNewTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) =
+		(seqT(candidateNewTok) == seq+1)
+		-> (ReceiveToken_2A(id, localBlack, localCtrList, seq, active, oldTok, candidateNewTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced))
+		<> ( ((seqT(candidateNewTok) < seq+1) 
+			-> dismissOldToken(candidateNewTok) 
+			<> reportErrorDismissTooNewToken(id)
+			)
+			. Node(id, localBlack, localCtrList, seq, active, oldTok,false,EMPTYTOK, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) 
+		   )
+	;
+
+	ReceiveToken_2A(id:ID, localBlack:ID, localCtrList:CtrList, seq:Nat, active:Bool, oldTok:Token, newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) =
+		(active) 
+		-> (Node(id, localBlack, localCtrList, seq, active, oldTok,true,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced))
+		% We allow a node to crash here, to allow for crashes between
+		% receiving the token  & sending it off / Annoucing.	
+		<> (% crash(id)
+			% + 	
+			HandleToken(id, localBlack, localCtrList, seq, newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced))
+	;
+
+	%PRE: When we get here, the node is passive (not active) & has the token & the token is not old (seq_t = seq_i + 1).
+	HandleToken(id:ID, localBlack:ID, localCtrList:CtrList, seq:Nat, newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) = 		
+		% Note that we have previously, when receiving the newTok, already verified that seq_t == seq_i+1.
+		% update black_i
+		HandleToken_3(id, furthest(id, localBlack, blackT(newTok)) , localCtrList, seq, newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced);
+
+	HandleToken_3(id:ID, localBlack:ID, localCtrList:CtrList, seq:Nat, newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) = 
+		% update crashed_t
+		HandleToken_4(id, localBlack, localCtrList, seq, updateCrTMin(newTok, crashedSet), basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced);
+	
+	HandleToken_4(id:ID, localBlack:ID, localCtrList:CtrList, seq:Nat, newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) = 
+		% update crashed_i
+		HandleToken_5(id, localBlack, localCtrList, seq, newTok, basicDone, report, (crashedSet+crashedT(newTok)), next, isOnlyNodeAndAnnounced);
+	
+	HandleToken_5(id:ID, localBlack:ID, localCtrList:CtrList, seq:Nat, newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) = 
+		% update report_i
+		HandleToken_6(id, localBlack, localCtrList, seq, newTok, basicDone, (report-crashedT(newTok)), crashedSet, next, isOnlyNodeAndAnnounced);
+
+	HandleToken_6(id:ID, localBlack:ID, localCtrList:CtrList, seq:Nat, newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) = 
+		(localBlack == id || report == {}) 
+			-> (addToCountT(id) .
+				HandleToken_10(id, localBlack, localCtrList, seq, updateCoT(newTok, id, sumNonCrashed(crashedSet, localCtrList)), 
+								basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced)	
+			   )
+			<> (skipAddToCountT(id) . 
+				HandleToken_10(id, localBlack, localCtrList, seq, newTok, 
+								basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) %no change
+			)
+	;	
+	
+		HandleToken_10(id:ID, localBlack:ID, localCtrList:CtrList, seq:Nat, newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) = 
+			% We combine the if on line 10, and the summation on lines 11-13, and the condition based on said summation on lines 14-15 here.
+			(localBlack == id && (sumNonCrashed( crashedSet, countT(newTok) ) == 0 ) )
+			-> ( (Announce(id) . Node(id, id, localCtrList, seq, false,EMPTYTOK,false,EMPTYTOK, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) ) )  
+			<> (HandleToken_16(id, localBlack, localCtrList, seq, newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) %no change
+			);
+	
+	HandleToken_16(id:ID, localBlack:ID, localCtrList:CtrList, seq:Nat, newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) = 
+		(next in crashedT(newTok)) 
+			-> (newSucc_HT(id, localBlack, localCtrList, seq, newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced)) % newSuccessor will call HT_18. 
+			<>  (HandleToken_18(id, localBlack, localCtrList, seq, newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) ) %no change
+			;
+	
+	HandleToken_18(id:ID, localBlack:ID, localCtrList:CtrList, seq:Nat, newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) = 
+		(next < id) 
+			-> (HandleToken_20(id, localBlack, localCtrList, seq, incrSeqT(newTok), basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced))
+			<> (HandleToken_20(id, localBlack, localCtrList, seq, newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced));
+	
+	HandleToken_20(id:ID, localBlack:ID, localCtrList:CtrList, seq:Nat, newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) = 
+		( (report != {}) 
+			-> (
+				HandleToken_25(id, localBlack, localCtrList, seq, updateBlackT(updateCrTPlus(newTok, report), id), basicDone, {}, (crashedSet+report), next, isOnlyNodeAndAnnounced)
+			) 
+			<> (HandleToken_25(id, localBlack, localCtrList, seq, updateBlackT(newTok, furthest(id, localBlack, next)), basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced))
+
+		) 
+	;	
+	HandleToken_25(id:ID, localBlack:ID, localCtrList:CtrList, seq:Nat, newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) = 
+		% We do not send the token from id to itself (next=id iff isOnlyNodeAndAnnounced).
+		(!isOnlyNodeAndAnnounced) -> (
+		tokSendToBuff(newTok, id, next) 
+		. Node(id, id, localCtrList, seq+1, false, newTok,false,EMPTYTOK, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced)
+		)
+		<>
+		( Node(id, id, localCtrList, seq+1, false, newTok,false,EMPTYTOK, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) )
+		;
+
+
+	
+	% oldNext = the j that crashed, and that (pre-call) equals next_i.
+	newSucc_FD(id:ID, black:ID, mCtrList:CtrList, seq : Nat, active:Bool, oldTok:Token,hasToken:Bool,newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), oldNext:ID, isOnlyNodeAndAnnounced:Bool) = 
+		newSucc_4_FD(id, black, mCtrList, seq, active, oldTok,hasToken,newTok, basicDone, report, crashedSet, getNextID( NatToID((IDtoNat(oldNext)+1) mod N_PROCS) , (crashedSet+report)), isOnlyNodeAndAnnounced);
+	
+	newSucc_HT(id:ID, black:ID, mCtrList:CtrList, seq : Nat, newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), oldNext:ID, isOnlyNodeAndAnnounced:Bool) = 
+		newSucc_4_HT(id, black, mCtrList, seq, newTok, basicDone, report, crashedSet, getNextID( NatToID((IDtoNat(oldNext)+1) mod N_PROCS) , (crashedSet+report)), isOnlyNodeAndAnnounced);
+	
+	% If we have only 1 node remaining, we can Announce and return to Node. Add the report set to the crashedSet, so that we don't receive messages from crashed nodes.
+	newSucc_4_FD(id:ID, black:ID, mCtrList:CtrList, seq : Nat, active:Bool, oldTok:Token,hasToken:Bool,newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) = 
+		(next == id) 
+		-> ( lastNodeRemaining(id) . (active) 
+				-> (BecomePassive(id) . Announce(id) . Node(id, id, mCtrList, seq, false,EMPTYTOK,false,EMPTYTOK, basicDone, {}, (report+crashedSet), next, true))
+				<> (					Announce(id) . Node(id, id, mCtrList, seq, false,EMPTYTOK,false,EMPTYTOK, basicDone, {}, (report+crashedSet), next, true))
+		   )
+		<> ( (black == id) 	-> localFD_6(id, black, mCtrList, seq, active, oldTok,hasToken,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) 
+							<> localFD_6(id, furthest(id, black, next), mCtrList, seq, active, oldTok,hasToken,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) 
+		   )
+	;
+	
+	newSucc_4_HT(id:ID, black:ID, mCtrList:CtrList, seq : Nat, newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) = 
+		(next == id) 
+		-> ( lastNodeRemaining(id) . % No need to check the active parameter: during HT, we know that the node is passive.
+				Announce(id) . Node(id, id, mCtrList, seq, false,EMPTYTOK,false,EMPTYTOK, basicDone, {}, (report+crashedSet), next, true)
+		   )
+		<> ( (black == id) 	-> HandleToken_18(id, black, mCtrList, seq, newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) 
+							<> HandleToken_18(id, furthest(id, black, next), mCtrList, seq, newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) 
+		   )
+	;
+
+		
+	localFD(id:ID, black:ID, mCtrList:CtrList, seq : Nat, active:Bool, oldTok:Token,hasToken:Bool,newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) = 
+		sum j:ID . (!(j in crashedSet+report)) -> (
+			rInformCrashed(id, j) . (j == next) 
+			-> (newSucc_FD(id, black, mCtrList, seq, active, oldTok,hasToken,newTok, basicDone, (report+{j}), crashedSet, next, isOnlyNodeAndAnnounced))
+			<> (Node(id, black, mCtrList, seq, active, oldTok,hasToken,newTok, basicDone, (report+{j}), crashedSet, next, isOnlyNodeAndAnnounced)) % simply add j to report_i & continue.
+			)
+	;
+
+	localFD_6(id:ID, black:ID, mCtrList:CtrList, seq : Nat, active:Bool, oldTok:Token,hasToken:Bool,newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) =
+		(seq > 0 || next < id) 
+		-> ( (next < id) 
+			-> (localFD_11(id, black, mCtrList, seq, active, setSeqT(updateBlackT(updateCrTPlus(oldTok, report), id), seq+1),hasToken,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced)) 
+			<> (localFD_11(id, black, mCtrList, seq, active,  		 updateBlackT(updateCrTPlus(oldTok, report), id) 		,hasToken,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) )
+		)
+		<> (Node(id, black, mCtrList, seq, active, oldTok,hasToken,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) )	
+	;
+
+	localFD_11(id:ID, black:ID, mCtrList:CtrList, seq : Nat, active:Bool, oldTok:Token,hasToken:Bool,newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) = 
+		tokSendToBuff(oldTok, id, next)
+		. Node(id, black, mCtrList, seq, active, oldTok,hasToken,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced)
+		;
+
+	
+
+	Node(id:ID, black:ID, mCtrList:CtrList, seq : Nat, active:Bool, oldTok:Token,hasToken:Bool,newTok:Token, basicDone:Bool, report:FSet(ID), crashedSet:FSet(ID), next:ID, isOnlyNodeAndAnnounced:Bool) = 
+	%( crash(id) )
+	% +
+	%(
+	%	reportSeq(seq) . Node(id, black, mCtrList, seq, active, oldTok,hasToken,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced)
+	%)
+	%+
+	(
+		localFD(id, black, mCtrList, seq, active, oldTok,hasToken,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) % localFD will return to Node.
+	)
+	+ 
+	(	% if id knows that a sender j has crashed (so j \in crashed_id), 
+		% then this node id will not read from this channel.
+		% For the doneChecker, we can thus act as though this channel is empty.
+		% Note specifically that we do NOT do this if j is only in report, 
+		% as we can still read from j as long as j is only in report.
+		sum j:ID . (j in crashedSet && !isOnlyNodeAndAnnounced) 
+			-> (sRecKnowsCr(j,id) 
+			. Node(id, black, mCtrList, seq, active, oldTok,hasToken,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) )
+	)
+	+
+	( 
+		(active) -> (reportActive(id) . Node(id, black, mCtrList, seq, active, oldTok,hasToken,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced)) 
+	)
+	+
+	(
+		(id in (report+crashedSet+crashedT(newTok))) -> (reportErrorIDinCrashed(id) . Node(id, black, mCtrList, seq, active, oldTok,hasToken,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced))
+	)
+	+
+	((active) ->
+		(
+			((!basicDone) -> sum j:ID . 
+				((j != id && !(j in (crashedSet+report+crashedT(newTok) )) ) -> 
+					(rcvPermSend(id) . 
+						(sendToBuff(seq, id, j) 
+						. Node(id, black, incrAtID(j, mCtrList), seq, active, oldTok,hasToken,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced))
+					)
+				)
+			)
+			+ ( BecomePassive(id) . 
+				(hasToken)
+				-> (HandleToken(id, black, mCtrList, seq, newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced))
+				<> (Node(id, black, mCtrList, seq, false, oldTok,hasToken,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced))
+			  )
+		)
+	<>
+		((hasToken) -> % If holding token, and we are (now) not-active, handle the token.
+			( HandleToken(id, black, mCtrList, seq, newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced) )
+		) 
+	)
+	+ 
+	( sum j:ID . (j != id && !(j in crashedSet) ) -> sum newSeq:Nat . 
+		(recFromBuff(newSeq,j, id) . 
+			% The node may wake up from receiving a message.
+			( (!active) -> BecomeActive(id) <> nodeAlreadyActive(id) ) . 
+		 	((newSeq == seq+1 || (newSeq == seq && j > id)) 
+				% we only update black with furthest_i(black,j) if ^ is true. (Line 3 of RBM).
+				-> Node(id, furthest(id, black,j), decrAtId(j, mCtrList), seq, true, oldTok,hasToken,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced)
+				<> (newSeq <= seq+1)
+					-> Node(id, black, decrAtId(j, mCtrList), seq, true, oldTok,hasToken,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced)
+					<> reportErrorTooNewMessage(id) .
+					   Node(id, black, decrAtId(j, mCtrList), seq, true, oldTok,hasToken,newTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced)
+			)
+		) 
+	)
+	+
+	% Receive the token. This assumes we are not currently holding a token (in the fault-tolerant version).
+	((!hasToken) -> 
+		ReceiveToken(id, black, mCtrList, seq, active, oldTok, basicDone, report, crashedSet, next, isOnlyNodeAndAnnounced)
+	)
+	+ 
+	(
+		(!basicDone) -> 
+			(informDone(id) . Node(id, black, mCtrList, seq, active, oldTok,hasToken,newTok, true, report, crashedSet, next, isOnlyNodeAndAnnounced)
+			)
+	)
+	;
+
+	msgBuff(b:MsgBuff, sndr:ID,recv:ID) = sum seq:Nat . 
+		(
+		% Receive a message
+			(recToBuff(seq, sndr, recv) . msgBuff( add(b, seq), sndr, recv) )
+		+ % Send a message on. 
+			( (seq in b) ->  sendFromBuff(seq, sndr, recv) . msgBuff( remove(b, seq), sndr, recv) )
+		)
+		+ % if the buffer is empty (and if the doneC can receive this) inform it that buffer is empty.
+		( (b == []) -> informEmpty(sndr, recv) . msgBuff(b, sndr, recv))
+	;
+
+	tokenBuff(tb:TokBuff, sndr:ID,recv:ID) = sum t:Token . (
+		% Receive a token
+		(tokRecToBuff(t, sndr, recv) . tokenBuff( addT(tb, t), sndr, recv ) )
+		+ % Send a token on.
+		( (t in tb) ->  tokSendFromBuff(t, sndr, recv) . tokenBuff( removeT(tb,t), sndr, recv) )
+	);
+	
+	
+	doneChecker_A = 
+		(recvDoneID(Zero) + rCrDone(Zero)) . (recvDoneID(One) + rCrDone(One)) . (recvDoneID(Two) + rCrDone(Two)) . (recvDoneID(Three) + rCrDone(Three)) . doneChecker_B;
+	
+	doneChecker_B = 
+		% A channel must be empty, the receiver must have crashed, 
+		% or the receiver must know that the sender has crashed, before we 
+		% can determine that the channel is done. 
+		(recvEmpty(Zero,One) + rCrDone(One) + rRecKnowsCr(Zero,One)) . (recvEmpty(One,Zero) + rCrDone(Zero) + rRecKnowsCr(One, Zero)) . 
+		(recvEmpty(Zero,Two) + rCrDone(Two) + rRecKnowsCr(Zero,Two)) . (recvEmpty(Two,Zero) + rCrDone(Zero) + rRecKnowsCr(Two, Zero)) . 
+		(recvEmpty(Two,One) + rCrDone(One) + rRecKnowsCr(Two,One)) . (recvEmpty(One,Two) + rCrDone(Two) + rRecKnowsCr(One, Two)) . 
+		(recvEmpty(Zero,Three) + rCrDone(Three) + rRecKnowsCr(Zero,Three)) . (recvEmpty(Three,Zero) + rCrDone(Zero) + rRecKnowsCr(Three, Zero)) . 
+		(recvEmpty(One,Three) + rCrDone(Three) + rRecKnowsCr(One, Three))  . (recvEmpty(Three,One) + rCrDone(One) + rRecKnowsCr(Three,One)) .  
+		(recvEmpty(Two,Three) + rCrDone(Three) + rRecKnowsCr(Two,Three))   . (recvEmpty(Three,Two) + rCrDone(Two) + rRecKnowsCr(Three, Two)) . 
+		basicAlgoDone . donechecker_C;
+	
+	donechecker_C = informExtraTokSafe . donechecker_C;
+
+
+	msgCounter(n:Nat) = sum i:ID . 
+		(n < MSG_LIMIT_GLOBAL) -> (sndPermSend(i) . msgCounter(n+1))
+	; 
+
+	globalFD(crashedNodes:FSet(ID)) = sum i:ID . (i in crashedNodes) 
+	-> 
+		( (sCrDone(i) . globalFD(crashedNodes))
+		+ 
+		(sum j:ID . (i != j && !(j in crashedNodes)) -> (sInformCrashed(j,i) . globalFD(crashedNodes)) )
+	    )
+	<> ((# crashedNodes < MAX_N_CRASHES) -> (fdDetect(i) . globalFD(crashedNodes+{i}) ))
+	;
+	
+init 
+	hide ({sendToBuff, recToBuff, sendFromBuff, recFromBuff,  tokSendToBuff, tokRecToBuff, 
+		   tokSendFromBuff, tokRecFromBuff, informDone, recvDoneID, informEmpty, recvEmpty, 
+		   informExtraTokSafe, recvTokSafe, 
+		   sndPermSend, rcvPermSend, 
+		   sInformCrashed, rInformCrashed, crash, fdDetect, sCrDone, rCrDone, sRecKnowsCr, rRecKnowsCr}, 
+		allow( {toBuff, fromBuff, tokToBuff, tokFromBuff,  Announce, BecomeActive, BecomePassive, nodeAlreadyActive,
+				basicAlgoDone, 
+				doneComm, emptyComm, tokSafeComm,
+				cPermSend,
+				reportActive,reportErrorDismissTooNewToken,reportErrorIDinCrashed, reportErrorTooNewMessage, reportSeq,
+				% New for the Tolerant version:
+				cCrash, cInformCrashed,
+				dismissOldToken,
+				cCrDone, cRecKnowsCr,
+				addToCountT, skipAddToCountT,lastNodeRemaining
+				},
+			comm({sendToBuff|recToBuff -> toBuff, sendFromBuff|recFromBuff -> fromBuff,  
+				  tokSendToBuff|tokRecToBuff -> tokToBuff, tokSendFromBuff|tokRecFromBuff -> tokFromBuff,
+				  informDone|recvDoneID -> doneComm, informEmpty|recvEmpty -> emptyComm, 
+				  informExtraTokSafe|recvTokSafe -> tokSafeComm,
+				  sndPermSend|rcvPermSend -> cPermSend,
+				  % New for the Tolerant version:
+				  crash|fdDetect -> cCrash, 
+				  sInformCrashed|rInformCrashed -> cInformCrashed,
+				  sCrDone|rCrDone -> cCrDone,
+				  sRecKnowsCr|rRecKnowsCr -> cRecKnowsCr}, 
+				   Node(Zero,Zero, INIT_LIST, 0, true, INIT_OLD_TOK(Zero), true, quad(INIT_LIST,BLACK_INIT_ZERO, {}, 1), false, {},{}, One, false) 
+				|| Node(One, One,  INIT_LIST, 0, true, INIT_OLD_TOK(One), false, EMPTYTOK, false, {},{}, Two, false)
+				|| Node(Two, Two,  INIT_LIST, 0, true, INIT_OLD_TOK(Two), false, EMPTYTOK, false, {},{}, Three, false)
+				|| Node(Three, Three,  INIT_LIST, 0, true, INIT_OLD_TOK(Three), false, EMPTYTOK, false, {},{}, Zero, false)
+				|| msgBuff([], Zero,One) || msgBuff([], One,Zero)
+				|| msgBuff([], Zero,Two) || msgBuff([], Two,Zero)
+				|| msgBuff([], Two,One) || msgBuff([], One,Two)
+				|| msgBuff([], Zero,Three) || msgBuff([], Three,Zero)
+				|| msgBuff([], One,Three) || msgBuff([], Three,One)
+				|| msgBuff([], Two,Three) || msgBuff([], Three,Two)
+				|| tokenBuff([], Zero,One) || tokenBuff([], One,Zero)
+				|| tokenBuff([], Two,One) || tokenBuff([], One,Two)
+				|| tokenBuff([], Zero,Two) || tokenBuff([], Two,Zero)
+				|| tokenBuff([], Zero,Three) || tokenBuff([], Three,Zero)
+				|| tokenBuff([], One,Three) || tokenBuff([], Three,One)
+				|| tokenBuff([], Two,Three) || tokenBuff([], Three,Two)
+				|| doneChecker_A
+				|| msgCounter(0)
+				|| globalFD({})
+			)
+		)
+	)
+;

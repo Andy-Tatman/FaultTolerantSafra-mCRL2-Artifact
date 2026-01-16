@@ -1,0 +1,1 @@
+forall i:ID . [true* . reportErrorTooNewMessage(i)]false

@@ -1,0 +1,2 @@
+% for N=4
+mu X. [!Announce(Zero) && !Announce(One) && !Announce(Two) && !Announce(Three)]X && <true>true

@@ -1,0 +1,9 @@
+<root>
+ <spec>Tol_Bug_Demonstration_spec.mcrl2</spec>
+ <properties>
+  <property>Safety n3</property>
+ </properties>
+ <jittyc>false</jittyc>
+ <linearisation_method>regular2</linearisation_method>
+ <enumeration_limit>0</enumeration_limit>
+</root>

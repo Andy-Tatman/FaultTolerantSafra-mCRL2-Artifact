@@ -1,0 +1,7 @@
+<root>
+ <spec>Tol_Safra_n3_Crashes_Reduced_spec.mcrl2</spec>
+ <properties/>
+ <jittyc>false</jittyc>
+ <linearisation_method>regular2</linearisation_method>
+ <enumeration_limit>0</enumeration_limit>
+</root>

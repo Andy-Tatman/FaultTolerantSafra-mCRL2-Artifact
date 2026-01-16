@@ -1,0 +1,2 @@
+% for N=2
+mu X. [!Announce(Zero) && !Announce(One)]X && <true>true

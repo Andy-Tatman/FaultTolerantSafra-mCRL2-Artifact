@@ -1,0 +1,6 @@
+% Only in the fault-tolerant models!
+% For N=3.
+forall i:ID . 
+[true* . Announce(i) . true* . cCrash(i)]
+mu X. [!Announce(Zero) && !Announce(One) && !Announce(Two)]X 
+    && <true>true

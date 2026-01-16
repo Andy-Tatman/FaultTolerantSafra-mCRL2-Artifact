@@ -1,0 +1,3 @@
+% for N=3
+% Note, this property is VIOLATED in this specification.
+forall i:ID . [true* . (Announce(Zero) + Announce(One) + Announce(Two)) . true* . (BecomeActive(i) + reportActive(i))]false
