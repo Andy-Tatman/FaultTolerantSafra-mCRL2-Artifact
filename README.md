@@ -4,7 +4,7 @@ Repository for specification files (.mcrl2) &amp; formulas (.mcf) for my MSc The
 # Overview
 This repository contains the model specifications based on a fault-sensitive and fault-tolerant version of Safra's algorithm for termination detection, as presented [here](https://doi.org/10.1007/978-3-030-91014-3_5).
 These specifications are intended to be used with [mCRL2](https://www.mcrl2.org/web/index.html), specifically version 202507.0.
-You can find the full artifact for my thesis, including the developed .lts & .pbes files, on [Mendely Data](https://data.mendeley.com/datasets/tnt3z9tzcy/1). 
+You can find the full artifact for my thesis, including the developed .lts & .pbes files, on [Mendely Data](https://doi.org/10.17632/tnt3z9tzcy.1). 
 In Chapter 6 of my thesis, we spell out what options we set to generate our files. These are also  (largely) used in the _.py_ scripts provided here.
 
 Note that for many of the specifications (and especially the fault-tolerant models), generating the models and checking the formulas in the mCRL2 IDE is impractical. 
