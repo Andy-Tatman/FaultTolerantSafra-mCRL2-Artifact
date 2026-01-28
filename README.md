@@ -1,5 +1,5 @@
 # FaultTolerantSafra-mCRL2-Artifact
-Repository for specification files (.mcrl2) &amp; formulas (.mcf) for my MSc Thesis. (Link TODO)
+Repository for specification files (.mcrl2) &amp; formulas (.mcf) for my MSc Thesis. (See [here](https://www.cs.vu.nl/%7Ewanf/theses/tatman-mscthesis.pdf), or check the tatman-mscthesis-Final.pdf file.)
 
 # Overview
 This repository contains the model specifications based on a fault-sensitive and fault-tolerant version of Safra's algorithm for termination detection, as presented [here](https://doi.org/10.1007/978-3-030-91014-3_5).
